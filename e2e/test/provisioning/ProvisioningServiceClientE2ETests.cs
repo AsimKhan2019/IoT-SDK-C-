@@ -255,7 +255,14 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
             }
         }
 
-        public static async Task<IndividualEnrollment> CreateIndividualEnrollment(ProvisioningServiceClient provisioningServiceClient, AttestationMechanismType attestationType, ReprovisionPolicy reprovisionPolicy, AllocationPolicy allocationPolicy, CustomAllocationDefinition customAllocationDefinition, ICollection<string> iotHubsToProvisionTo, DeviceCapabilities capabilities)
+        public static async Task<IndividualEnrollment> CreateIndividualEnrollment(
+            ProvisioningServiceClient provisioningServiceClient, 
+            AttestationMechanismType attestationType, 
+            ReprovisionPolicy reprovisionPolicy, 
+            AllocationPolicy allocationPolicy, 
+            CustomAllocationDefinition customAllocationDefinition, 
+            ICollection<string> iotHubsToProvisionTo, 
+            Devices.Provisioning.Service.DeviceCapabilities capabilities)
         {
             string registrationId = AttestationTypeToString(attestationType) + "-registration-id-" + Guid.NewGuid();
             Attestation attestation;
@@ -301,7 +308,15 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
             return await provisioningServiceClient.CreateOrUpdateIndividualEnrollmentAsync(individualEnrollment).ConfigureAwait(false);
         }
 
-        public static async Task<EnrollmentGroup> CreateEnrollmentGroup(ProvisioningServiceClient provisioningServiceClient, AttestationMechanismType attestationType, string groupId, ReprovisionPolicy reprovisionPolicy, AllocationPolicy allocationPolicy, CustomAllocationDefinition customAllocationDefinition, ICollection<string> iothubs, DeviceCapabilities capabilities)
+        public static async Task<EnrollmentGroup> CreateEnrollmentGroup(
+            ProvisioningServiceClient provisioningServiceClient, 
+            AttestationMechanismType attestationType, 
+            string groupId, 
+            ReprovisionPolicy reprovisionPolicy, 
+            AllocationPolicy allocationPolicy, 
+            CustomAllocationDefinition customAllocationDefinition, 
+            ICollection<string> iothubs, 
+            Devices.Provisioning.Service.DeviceCapabilities capabilities)
         {
             Attestation attestation;
             switch (attestationType)

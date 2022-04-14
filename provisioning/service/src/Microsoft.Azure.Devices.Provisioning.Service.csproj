@@ -37,6 +37,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Transport\**" />
+    <EmbeddedResource Remove="Transport\**" />
+    <None Remove="Transport\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="$(RootDir)\LICENSE" Pack="true" PackagePath="" />
     <None Include="$(RootDir)\shared\icons\nugetIcon.png" Pack="true" PackagePath="" />
   </ItemGroup>
@@ -78,9 +84,5 @@
       <LastGenOutput>ApiResources.Designer.cs</LastGenOutput>
       <CustomToolNamespace>Microsoft.Azure.Devices</CustomToolNamespace>
     </EmbeddedResource>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Transport\Amqp\" />
   </ItemGroup>
 </Project>

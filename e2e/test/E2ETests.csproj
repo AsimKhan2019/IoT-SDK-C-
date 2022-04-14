@@ -33,7 +33,6 @@
   <ItemGroup Condition=" '$(AZURE_IOT_LOCALPACKAGES)' == '' ">
     <ProjectReference Include="$(RootDir)\iothub\device\src\Microsoft.Azure.Devices.Client.csproj" />
     <ProjectReference Include="$(RootDir)\iothub\service\src\Microsoft.Azure.Devices.csproj" />
-    <ProjectReference Include="$(RootDir)\shared\src\Microsoft.Azure.Devices.Shared.csproj" />
     <ProjectReference Include="$(RootDir)\provisioning\device\src\Microsoft.Azure.Devices.Provisioning.Client.csproj" />
     <ProjectReference Include="$(RootDir)\provisioning\transport\amqp\src\Microsoft.Azure.Devices.Provisioning.Transport.Amqp.csproj" />
     <ProjectReference Include="$(RootDir)\provisioning\transport\http\src\Microsoft.Azure.Devices.Provisioning.Transport.Http.csproj" />
@@ -47,7 +46,6 @@
 
   <ItemGroup Condition=" '$(AZURE_IOT_LOCALPACKAGES)' != '' ">
     <PackageReference Include="Microsoft.Azure.Devices" Version="1.*" />
-    <PackageReference Include="Microsoft.Azure.Devices.Shared" Version="1.*" />
     <PackageReference Include="Microsoft.Azure.Devices.Client" Version="1.*" />
     <PackageReference Include="Microsoft.Azure.Devices.Provisioning.Client" Version="1.*" />
     <PackageReference Include="Microsoft.Azure.Devices.Provisioning.Transport.Amqp" Version="1.*" />

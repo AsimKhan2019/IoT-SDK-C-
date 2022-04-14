@@ -206,8 +206,8 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
         }
 
         /// <summary>
-        /// This test flow reprovisions a device after that device created some twin updates on its original hub.
-        /// The expected behaviour is that, with ReprovisionPolicy set to not migrate data, the twin updates from the original hub are not present at the new hub
+        /// This test flow re-provisions a device after that device created some twin updates on its original hub.
+        /// The expected behavior is that, with ReprovisionPolicy set to not migrate data, the twin updates from the original hub are not present at the new hub
         /// </summary>
         private async Task ProvisioningDeviceClient_ReprovisioningFlow_ResetTwin(Client.TransportType transportProtocol, AttestationMechanismType attestationType, EnrollmentType enrollmentType, bool setCustomProxy, string customServerProxy = null)
         {
@@ -218,8 +218,8 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
         }
 
         /// <summary>
-        /// This test flow reprovisions a device after that device created some twin updates on its original hub.
-        /// The expected behaviour is that, with ReprovisionPolicy set to migrate data, the twin updates from the original hub are present at the new hub
+        /// This test flow re-provisions a device after that device created some twin updates on its original hub.
+        /// The expected behavior is that, with ReprovisionPolicy set to migrate data, the twin updates from the original hub are present at the new hub
         /// </summary>
         private async Task ProvisioningDeviceClient_ReprovisioningFlow_KeepTwin(Client.TransportType transportProtocol, AttestationMechanismType attestationType, EnrollmentType enrollmentType, bool setCustomProxy, string customServerProxy = null)
         {
@@ -230,7 +230,7 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
         }
 
         /// <summary>
-        /// The expected behaviour is that, with ReprovisionPolicy set to never update hub, the a device is not reprovisioned, even when other settings would suggest it should
+        /// The expected behavior is that, with ReprovisionPolicy set to never update hub, the a device is not re-provisioned, even when other settings would suggest it should
         /// </summary>
         private async Task ProvisioningDeviceClient_ReprovisioningFlow_DoNotReprovision(Client.TransportType transportProtocol, AttestationMechanismType attestationType, EnrollmentType enrollmentType, bool setCustomProxy, string customServerProxy = null)
         {
@@ -243,8 +243,8 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
         /// <summary>
         /// Provisions a device to a starting hub, tries to open a connection, send telemetry,
         /// and (if supported by the protocol) send a twin update. Then, this method updates the enrollment
-        /// to provision the device to a different hub. Based on the provided reprovisioning settings, this
-        /// method then checks that the device was/was not reprovisioned as expected, and that the device
+        /// to provision the device to a different hub. Based on the provided re-provisioning settings, this
+        /// method then checks that the device was/was not re-provisioned as expected, and that the device
         /// did/did not migrate twin data as expected.
         /// </summary>
         public async Task ProvisioningDeviceClient_ReprovisioningFlow(
@@ -297,13 +297,13 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
 
             await ConfirmRegisteredDeviceWorks(result, auth, transportProtocol, twinOperationsAllowed).ConfigureAwait(false);
 
-            //Check reprovisioning
+            //Check re-provisioning
             await UpdateEnrollmentToForceReprovision(enrollmentType, provisioningServiceClient, iotHubsToReprovisionTo, security, groupId).ConfigureAwait(false);
             result = await provClient.RegisterAsync(cts.Token).ConfigureAwait(false);
             ConfirmDeviceInExpectedHub(result, reprovisionPolicy, iotHubsToStartAt, iotHubsToReprovisionTo, allocationPolicy);
             await ConfirmDeviceWorksAfterReprovisioning(result, auth, transportProtocol, reprovisionPolicy, twinOperationsAllowed).ConfigureAwait(false);
 
-            if (attestationType != AttestationMechanismType.X509) //x509 enrollments are hardcoded, should never be deleted
+            if (attestationType != AttestationMechanismType.X509) //x509 enrollments are hard-coded, should never be deleted
             {
                 await DeleteCreatedEnrollmentAsync(enrollmentType, provisioningServiceClient, security, groupId).ConfigureAwait(false);
             }
@@ -332,8 +332,8 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
                 if (sendReportedPropertiesUpdate)
                 {
                     Logger.Trace("DeviceClient updating desired properties.");
-                    Twin twin = await iotClient.GetTwinAsync().ConfigureAwait(false);
-                    await iotClient.UpdateReportedPropertiesAsync(new TwinCollection($"{{\"{new Guid()}\":\"{new Guid()}\"}}")).ConfigureAwait(false);
+                    Client.Twin twin = await iotClient.GetTwinAsync().ConfigureAwait(false);
+                    await iotClient.UpdateReportedPropertiesAsync(new Client.TwinCollection($"{{\"{new Guid()}\":\"{new Guid()}\"}}")).ConfigureAwait(false);
                 }
 
                 Logger.Trace("DeviceClient CloseAsync.");
@@ -345,17 +345,25 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
         {
             if (capabilities != null)
             {
-                //hardcoding amqp since http does not support twin, but tests that call into this may use http
+                //hard-coding AMQP since HTTP does not support twin, but tests that call into this may use HTTP
                 using (var iotClient = DeviceClient.Create(result.AssignedHub, auth, Client.TransportType.Amqp))
                 {
                     //Confirm that the device twin reflects what the enrollment dictated
-                    Twin twin = await iotClient.GetTwinAsync().ConfigureAwait(false);
+                    Client.Twin twin = await iotClient.GetTwinAsync().ConfigureAwait(false);
                     Assert.AreEqual(capabilities.IotEdge, twin.Capabilities.IotEdge);
                 }
             }
         }
 
-        private async Task<SecurityProvider> CreateSecurityProviderFromName(AttestationMechanismType attestationType, EnrollmentType? enrollmentType, string groupId, ReprovisionPolicy reprovisionPolicy, AllocationPolicy allocationPolicy, CustomAllocationDefinition customAllocationDefinition, ICollection<string> iothubs, DeviceCapabilities capabilities = null)
+        private async Task<SecurityProvider> CreateSecurityProviderFromName(
+            AttestationMechanismType attestationType, 
+            EnrollmentType? enrollmentType, 
+            string groupId, 
+            ReprovisionPolicy reprovisionPolicy, 
+            AllocationPolicy allocationPolicy, 
+            CustomAllocationDefinition customAllocationDefinition, 
+            ICollection<string> iothubs, 
+            Devices.Provisioning.Service.DeviceCapabilities capabilities = null)
         {
             _verboseLog.WriteLine($"{nameof(CreateSecurityProviderFromName)}({attestationType})");
 
@@ -372,7 +380,17 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
                     using (var provisioningService = ProvisioningServiceClient.CreateFromConnectionString(TestConfiguration.Provisioning.ConnectionString))
                     {
                         Logger.Trace($"Getting enrollment: RegistrationID = {registrationId}");
-                        var individualEnrollment = new IndividualEnrollment(registrationId, new TpmAttestation(base64Ek)) { AllocationPolicy = allocationPolicy, ReprovisionPolicy = reprovisionPolicy, IotHubs = iothubs, CustomAllocationDefinition = customAllocationDefinition, Capabilities = capabilities };
+                        var individualEnrollment = new IndividualEnrollment(
+                            registrationId, 
+                            new TpmAttestation(base64Ek)) 
+                        { 
+                            AllocationPolicy = allocationPolicy, 
+                            ReprovisionPolicy = reprovisionPolicy, 
+                            IotHubs = iothubs, 
+                            CustomAllocationDefinition = customAllocationDefinition, 
+                            Capabilities = capabilities 
+                        };
+
                         IndividualEnrollment enrollment = await provisioningService.CreateOrUpdateIndividualEnrollmentAsync(individualEnrollment).ConfigureAwait(false);
                         var attestation = new TpmAttestation(base64Ek);
                         enrollment.Attestation = attestation;
@@ -477,13 +495,13 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
             Logger.Trace($"{result.Status} (Error Code: {result.ErrorCode}; Error Message: {result.ErrorMessage})");
             Logger.Trace($"ProvisioningDeviceClient AssignedHub: {result.AssignedHub}; DeviceID: {result.DeviceId}");
 
-            Assert.AreEqual(ProvisioningRegistrationStatusType.Assigned, result.Status, $"Unexpected provisioning status, substatus: {result.Substatus}, error code: {result.ErrorCode}, error message: {result.ErrorMessage}");
+            Assert.AreEqual(ProvisioningRegistrationStatusType.Assigned, result.Status, $"Unexpected provisioning status, sub-status: {result.Substatus}, error code: {result.ErrorCode}, error message: {result.ErrorMessage}");
             Assert.IsNotNull(result.AssignedHub);
             Assert.IsNotNull(result.DeviceId);
         }
 
         /// <summary>
-        /// Update the enrollment under test such that it forces it to reprovision to the hubs within <paramref name="iotHubsToReprovisionTo"/>
+        /// Update the enrollment under test such that it forces it to re-provision to the hubs within <paramref name="iotHubsToReprovisionTo"/>
         /// </summary>
         private async Task UpdateEnrollmentToForceReprovision(EnrollmentType? enrollmentType, ProvisioningServiceClient provisioningServiceClient, ICollection<String> iotHubsToReprovisionTo, SecurityProvider security, string groupId)
         {
@@ -502,7 +520,7 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
         }
 
         /// <summary>
-        /// Confirm that the hub the device belongs to did or did not change, depending on the reprovision policy
+        /// Confirm that the hub the device belongs to did or did not change, depending on the re-provision policy
         /// </summary>
         private void ConfirmDeviceInExpectedHub(DeviceRegistrationResult result, ReprovisionPolicy reprovisionPolicy, ICollection<string> iotHubsToStartAt, ICollection<string> iotHubsToReprovisionTo, AllocationPolicy allocationPolicy)
         {
@@ -538,7 +556,7 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
                 // from previous hub's records.
                 if (twinOperationsAllowed)
                 {
-                    Twin twin = await iotClient.GetTwinAsync().ConfigureAwait(false);
+                    Client.Twin twin = await iotClient.GetTwinAsync().ConfigureAwait(false);
 
                     if (reprovisionPolicy.MigrateDeviceData)
                     {

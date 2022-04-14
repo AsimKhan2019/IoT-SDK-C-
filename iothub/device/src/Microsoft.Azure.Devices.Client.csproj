@@ -108,4 +108,8 @@
     <PackageReference Include="System.Configuration.ConfigurationManager" Version="4.4.1" />
     <PackageReference Include="Microsoft.Win32.Registry" Version="4.5.0" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\shared\src\Microsoft.Azure.Devices.Shared.csproj" />
+  </ItemGroup>
 </Project>
