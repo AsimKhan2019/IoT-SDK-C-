@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-using DotNetty.Codecs.Mqtt.Packets;
 using Microsoft.Azure.Devices.Client.Extensions;
 using Microsoft.Azure.Devices.Shared;
 using System;
@@ -24,8 +23,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         private const bool DefaultMaxOutboundRetransmissionEnforced = false;
         private const int DefaultKeepAliveInSeconds = 300;
         private const int DefaultMaxPendingInboundMessages = 50;
-        private const QualityOfService DefaultPublishToServerQoS = QualityOfService.AtLeastOnce;
-        private const QualityOfService DefaultReceivingQoS = QualityOfService.AtLeastOnce;
 
         // The CONNACK timeout has been chosen to be 60 seconds to be in alignment with the service implemented timeout for processing connection requests.
         private static readonly TimeSpan s_defaultConnectArrivalTimeout = TimeSpan.FromSeconds(60);
@@ -68,11 +65,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             KeepAliveInSeconds = DefaultKeepAliveInSeconds;
             MaxOutboundRetransmissionEnforced = DefaultMaxOutboundRetransmissionEnforced;
             MaxPendingInboundMessages = DefaultMaxPendingInboundMessages;
-            PublishToServerQoS = DefaultPublishToServerQoS;
-            ReceivingQoS = DefaultReceivingQoS;
             QoSPropertyName = "mqtt-qos";
             RetainPropertyName = "mqtt-retain";
-            WillMessage = null;
             DefaultReceiveTimeout = s_defaultReceiveTimeout;
         }
 
@@ -106,18 +100,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         /// This property is currently unused.
         /// </remarks>
         public TimeSpan DeviceReceiveAckTimeout { get; set; }
-
-        /// <summary>
-        /// The QoS to be used when sending packets to service.
-        /// The default value is <see cref="QualityOfService.AtLeastOnce"/>.
-        /// </summary>
-        public QualityOfService PublishToServerQoS { get; set; }
-
-        /// <summary>
-        /// The QoS to be used when subscribing to receive packets from the service.
-        /// The default value is <see cref="QualityOfService.AtLeastOnce"/>.
-        /// </summary>
-        public QualityOfService ReceivingQoS { get; set; }
 
         /// <summary>
         /// The property on a message that indicates the publish packet has requested to be retained.
@@ -203,15 +185,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         /// For more details, refer to https://docs.microsoft.com/azure/iot-hub/iot-hub-mqtt-support#using-the-mqtt-protocol-directly-as-a-device.
         /// </remarks>
         public bool HasWill { get; set; }
-
-        /// <summary>
-        /// The configured will message that is sent to the telemetry channel on an ungraceful disconnect.
-        /// </summary>
-        /// <remarks>
-        /// The telemetry channel can be either the default Events endpoint or a custom endpoint defined by IoT Hub routing.
-        /// For more details, refer to https://docs.microsoft.com/azure/iot-hub/iot-hub-mqtt-support#using-the-mqtt-protocol-directly-as-a-device.
-        /// </remarks>
-        public IWillMessage WillMessage { get; set; }
 
         /// <summary>
         /// The time to wait for a receive operation. The default value is 1 minute.
