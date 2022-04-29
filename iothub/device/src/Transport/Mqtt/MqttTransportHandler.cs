@@ -11,6 +11,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Web;
 using Microsoft.Azure.Devices.Client.Common;
 using Microsoft.Azure.Devices.Client.Exceptions;
 using Microsoft.Azure.Devices.Common;
@@ -23,6 +24,7 @@ using MQTTnet.Client.Publishing;
 using MQTTnet.Client.Subscribing;
 using MQTTnet.Client.Unsubscribing;
 using MQTTnet.Protocol;
+using Newtonsoft.Json;
 
 #if NET5_0
 
@@ -62,6 +64,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         private const string TwinResponseTopic = "$iothub/twin/res/";
         private const string TwinGetTopic = "$iothub/twin/GET/?$rid={0}";
         private const string TwinResponseTopicPattern = @"\$iothub/twin/res/(\d+)/(\?.+)";
+        private readonly Regex _twinResponseTopicRegex = new Regex(TwinResponseTopicPattern, RegexOptions.Compiled);
 
         // Topic name for updating device twin's reported properties.
         // The client first subscribes to "$iothub/twin/res/#", to receive the operation's responses.
@@ -100,6 +103,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         private readonly ConcurrentQueue<Message> receivedCloudToDeviceMessages = new ConcurrentQueue<Message>();
         private readonly Dictionary<string, MqttApplicationMessageReceivedEventArgs> messagesToAcknowledge = new Dictionary<string, MqttApplicationMessageReceivedEventArgs>();
+
+        private readonly Dictionary<string, Twin> receivedTwins = new Dictionary<string, Twin>();
+        private SemaphoreSlim _getTwinSemaphore = new SemaphoreSlim(0);
+
+        private readonly Dictionary<string, int> reportedPropertyUpdateResponses = new Dictionary<string, int>();
+        private SemaphoreSlim _reportedPropertyUpdateResponsesSemaphore = new SemaphoreSlim(0);
 
         private SemaphoreSlim _receivingSemaphore = new SemaphoreSlim(0);
 
@@ -264,13 +273,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var mqttMessage = new MqttApplicationMessageBuilder()
-                .WithTopic(deviceToCloudMessagesTopic)
-                .WithPayload(message.GetBodyStream())
-                .WithAtLeastOnceQoS()
-                .Build();
+            var mqttMessage = ComposePublishPacket(message, deviceToCloudMessagesTopic);
 
             MqttClientPublishResult result = await mqttClient.PublishAsync(mqttMessage, cancellationToken);
+
             if (result.ReasonCode != MqttClientPublishReasonCode.Success)
             {
                 //TODO
@@ -401,24 +407,105 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             throw new NotSupportedException("TODO");
         }
 
-        public override Task EnableTwinPatchAsync(CancellationToken cancellationToken)
+        public override async Task EnableTwinPatchAsync(CancellationToken cancellationToken)
         {
-            throw new NotSupportedException("TODO");
+            //TODO factor out subscribe logic to one function?
+            MqttClientSubscribeOptions subscribeOptions = new MqttClientSubscribeOptionsBuilder()
+                .WithTopicFilter(TwinResponseTopic)
+                .Build();
+
+            MqttClientSubscribeResult subscribeResult = await mqttClient.SubscribeAsync(subscribeOptions, cancellationToken);
+
+            if (subscribeResult.Items.Count != 1)
+            {
+                //TODO 
+            }
+
+            if (subscribeResult.Items[0].ResultCode != MqttClientSubscribeResultCode.GrantedQoS1)
+            {
+                //TODO
+            }
         }
 
-        public override Task DisableTwinPatchAsync(CancellationToken cancellationToken)
+        public override async Task DisableTwinPatchAsync(CancellationToken cancellationToken)
         {
-            throw new NotSupportedException("TODO");
+            MqttClientUnsubscribeOptions unsubscribeOptions = new MqttClientUnsubscribeOptionsBuilder()
+                .WithTopicFilter(TwinResponseTopic)
+                .Build();
+
+            MqttClientUnsubscribeResult unsubscribeResult = await mqttClient.UnsubscribeAsync(unsubscribeOptions, cancellationToken);
+
+            if (unsubscribeResult.Items.Count != 1)
+            {
+                //TODO 
+            }
+
+            if (unsubscribeResult.Items[0].ReasonCode != MqttClientUnsubscribeResultCode.Success)
+            {
+                //TODO
+            }
         }
 
-        public override Task<Twin> SendTwinGetAsync(CancellationToken cancellationToken)
+        public override async Task<Twin> SendTwinGetAsync(CancellationToken cancellationToken)
         {
-            throw new NotSupportedException("TODO");
+            string rid = Guid.NewGuid().ToString();
+
+            MqttApplicationMessage mqttMessage = new MqttApplicationMessageBuilder()
+                .WithTopic(TwinGetTopic.FormatInvariant(rid))
+                .WithAtLeastOnceQoS()
+                .Build();
+
+            MqttClientPublishResult result = await mqttClient.PublishAsync(mqttMessage, cancellationToken);
+
+            if (result.ReasonCode != MqttClientPublishReasonCode.Success)
+            {
+                //TODO
+                throw new Exception("Failed to publish the mqtt packet");
+            }
+
+            //TODO possible that user calls getTwin twice in parallel and this definitely breaks. Talk to team about changing this API a bit in v2
+            _getTwinSemaphore.Wait(cancellationToken);
+
+            try
+            {
+                return receivedTwins[rid];
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("TODO", ex);
+            }
         }
 
-        public override Task SendTwinPatchAsync(TwinCollection reportedProperties, CancellationToken cancellationToken)
+        public override async Task SendTwinPatchAsync(TwinCollection reportedProperties, CancellationToken cancellationToken)
         {
-            throw new NotSupportedException("TODO");
+            string reqId = Guid.NewGuid().ToString();
+            string topic = string.Format(TwinReportedPropertiesPatchTopic, reqId);
+
+            string body = JsonConvert.SerializeObject(reportedProperties);
+
+            MqttApplicationMessage mqttMessage = new MqttApplicationMessageBuilder()
+                .WithTopic(topic)
+                .WithAtLeastOnceQoS()
+                .WithPayload(Encoding.UTF8.GetBytes(body))
+                .Build();
+
+            MqttClientPublishResult result = await mqttClient.PublishAsync(mqttMessage);
+
+            if (result.ReasonCode != MqttClientPublishReasonCode.Success)
+            {
+                //TODO
+                throw new Exception("Failed to publish the mqtt packet");
+            }
+
+            _reportedPropertyUpdateResponsesSemaphore.Wait(cancellationToken);
+
+            //TODO try/catch
+            int status = reportedPropertyUpdateResponses[reqId];
+
+            if (status != 204)
+            {
+                throw new Exception("TODO");
+            }
         }
 
         public override async Task CompleteAsync(string lockToken, CancellationToken cancellationToken)
@@ -477,31 +564,30 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             receivedEventArgs.AutoAcknowledge = false;
             string topic = receivedEventArgs.ApplicationMessage.Topic;
-            string lockToken;
-            //TODO need to peel off the # at the end of the topic. This is probably why there is a topic and a topic filter
             if (topic.StartsWith(deviceBoundMessagesReceivingTopic))
             {
-                lockToken = HandleReceivedCloudToDeviceMessage(receivedEventArgs);
+                HandleReceivedCloudToDeviceMessage(receivedEventArgs);
             }
-            else if (topic.StartsWith("TODO twin desired props"))
+            else if (topic.StartsWith(TwinDesiredPropertiesPatchTopic))
             {
-                lockToken = HandleReceivedCloudToDeviceMessage(receivedEventArgs);
+                await HandleReceivedDesiredPropertiesUpdateRequest(receivedEventArgs);
             }
             else if (topic.StartsWith(DirectMethodsReceivingTopicFormat, StringComparison.OrdinalIgnoreCase))
             {
-                lockToken = await HandleReceivedDirectMethodRequest(receivedEventArgs);
+                await HandleReceivedDirectMethodRequest(receivedEventArgs);
             }
-            else 
+            else if (topic.StartsWith(TwinResponseTopic))
+            {
+                HandleTwinResponse(receivedEventArgs);
+            }
+            else
             {
                 //TODO log warn
                 return;
             }
-
-            // save the received message instance so that 
-            messagesToAcknowledge[lockToken] = receivedEventArgs;
         }
 
-        private string HandleReceivedCloudToDeviceMessage(MqttApplicationMessageReceivedEventArgs receivedEventArgs)
+        private void HandleReceivedCloudToDeviceMessage(MqttApplicationMessageReceivedEventArgs receivedEventArgs)
         {
             byte[] payload = receivedEventArgs.ApplicationMessage.Payload;
 
@@ -516,10 +602,11 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             _receivingSemaphore.Release();
 
-            return receivedCloudToDeviceMessage.LockToken;
+            // save the received mqtt message instance so that it can be completed later
+            messagesToAcknowledge[receivedCloudToDeviceMessage.LockToken] = receivedEventArgs;
         }
 
-        private async Task<string> HandleReceivedDirectMethodRequest(MqttApplicationMessageReceivedEventArgs receivedEventArgs)
+        private async Task HandleReceivedDirectMethodRequest(MqttApplicationMessageReceivedEventArgs receivedEventArgs)
         {
             byte[] payload = receivedEventArgs.ApplicationMessage.Payload;
 
@@ -541,32 +628,65 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             //TODO here or later?
             receivedEventArgs.AutoAcknowledge = true;
-
-            _receivingSemaphore.Release();
-
-            return receivedDirectMethod.LockToken;
         }
 
-        private string HandleReceivedDesiredPropertiesUpdateRequest(MqttApplicationMessageReceivedEventArgs receivedEventArgs)
+        private async Task HandleReceivedDesiredPropertiesUpdateRequest(MqttApplicationMessageReceivedEventArgs receivedEventArgs)
         {
             byte[] payload = receivedEventArgs.ApplicationMessage.Payload;
 
-            //TODO dispose?
-#pragma warning disable CA2000 // Dispose objects before losing scope
-            var receivedCloudToDeviceMessage = new Message(payload);
-#pragma warning restore CA2000 // Dispose objects before losing scope
+            string patch = Encoding.UTF8.GetString(receivedEventArgs.ApplicationMessage.Payload);
+            TwinCollection twinCollection = JsonConvert.DeserializeObject<TwinCollection>(patch);
 
-            PopulateMessagePropertiesFromPacket(receivedCloudToDeviceMessage, receivedEventArgs.ApplicationMessage);
+            //TODO do this on another thread, right? Maybe don't await this?
+            await Task.Run(() => _onDesiredStatePatchListener.Invoke(twinCollection)).ConfigureAwait(false);
 
-            //TODO should this be moved up a level so that it works for methods and twin messages as
-
-            receivedCloudToDeviceMessages.Enqueue(receivedCloudToDeviceMessage);
-
-            _receivingSemaphore.Release();
-
-            return receivedCloudToDeviceMessage.LockToken;
+            receivedEventArgs.AutoAcknowledge = true;
         }
 
+        private void HandleTwinResponse(MqttApplicationMessageReceivedEventArgs receivedEventArgs)
+        {
+            if (ParseResponseTopic(receivedEventArgs.ApplicationMessage.Topic, out string receivedRid, out int status))
+            {
+                byte[] payload = receivedEventArgs.ApplicationMessage.Payload;
+                if (payload.Length == 0)
+                {
+                    reportedPropertyUpdateResponses[receivedRid] = status;
+                    _reportedPropertyUpdateResponsesSemaphore.Release();
+                }
+                else 
+                {
+                    string body = Encoding.UTF8.GetString(payload);
+
+                    if (status != 200)
+                    {
+                        //TODO throw? But not from this thread
+                    }
+
+                    try
+                    {
+                        Twin twin = new Twin
+                        {
+                            Properties = JsonConvert.DeserializeObject<TwinProperties>(body),
+                        };
+
+                        receivedTwins[receivedRid] = twin;
+                    }
+                    catch (JsonReaderException ex)
+                    {
+                        if (Logging.IsEnabled)
+                            Logging.Error(this, $"Failed to parse Twin JSON: {ex}. Message body: '{body}'");
+
+                        // TODO don't throw in a callback thread
+                        throw;
+                    }
+
+                    // in a finally block?
+                    _getTwinSemaphore.Release();
+                }
+            }
+        }
+
+        //TODO only used in one place?
         public MqttApplicationMessage ComposePublishPacket(Message message, string topicName)
         {
             if (Logging.IsEnabled)
@@ -676,6 +796,21 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
 
             return msg;
+        }
+
+        private bool ParseResponseTopic(string topicName, out string rid, out int status)
+        {
+            Match match = _twinResponseTopicRegex.Match(topicName);
+            if (match.Success)
+            {
+                status = Convert.ToInt32(match.Groups[1].Value, CultureInfo.InvariantCulture);
+                rid = HttpUtility.ParseQueryString(match.Groups[2].Value).Get("$rid");
+                return true;
+            }
+
+            rid = "";
+            status = 500;
+            return false;
         }
     }
 }
