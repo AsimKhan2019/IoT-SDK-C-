@@ -235,6 +235,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 var uri = "ssl://" + iotHubConnectionString.HostName;
                 mqttClientOptionsBuilder.WithTcpServer(uri, ProtocolGatewayPort);
+                MqttClientOptionsBuilderTlsParameters tlsParameters = new MqttClientOptionsBuilderTlsParameters();
+                tlsParameters.Certificates = iotHubConnectionString.auth
+                mqttClientOptionsBuilder.WithTls();
             }
 
             if (iotHubConnectionString.SharedAccessKey != null)
