@@ -238,7 +238,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 var uri = "wss://" + iotHubConnectionString.HostName + "/$iothub/websocket";
                 mqttClientOptionsBuilder.WithWebSocketServer(uri);
 
-                if (_transportSettings.Proxy != null)
+                if (_transportSettings.Proxy != null && !(_transportSettings.Proxy is DefaultWebProxySettings))
                 {
                     //TODO no idea how to get the "address" that the mqtt client needs here
                     Uri uri2 = new Uri("wss://" + iotHubConnectionString.HostName);
@@ -365,7 +365,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             if (!isSubscribedToCloudToDeviceMessages)
             {
-                await SubscribeAsync(deviceBoundMessagesTopic, cancellationToken);
+                await SubscribeAsync(deviceBoundMessagesTopic, MqttClientSubscribeResultCode.GrantedQoS0, cancellationToken);
                 isSubscribedToCloudToDeviceMessages = true;
             }
 
@@ -383,7 +383,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public override async Task EnableMethodsAsync(CancellationToken cancellationToken)
         {
-            await SubscribeAsync(DirectMethodsSubscriptionTopicFormat, cancellationToken);
+            await SubscribeAsync(DirectMethodsSubscriptionTopicFormat, MqttClientSubscribeResultCode.GrantedQoS0, cancellationToken);
         }
 
         public override async Task DisableMethodsAsync(CancellationToken cancellationToken)
@@ -413,7 +413,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         public override async Task EnableEventReceiveAsync(bool isAnEdgeModule, CancellationToken cancellationToken)
         {
             //TODO what about isAnEdgeModule?
-            await SubscribeAsync(receiveEventMessageTopic, cancellationToken);
+            await SubscribeAsync(receiveEventMessageTopic, MqttClientSubscribeResultCode.GrantedQoS0, cancellationToken);
             isSubscribedToDesiredPropertyPatches = true;
         }
 
@@ -429,7 +429,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 return;
             }
 
-            await SubscribeAsync(TwinDesiredPropertiesPatchTopic, cancellationToken);
+            await SubscribeAsync(TwinDesiredPropertiesPatchTopic, MqttClientSubscribeResultCode.GrantedQoS0, cancellationToken);
 
             isSubscribedToDesiredPropertyPatches = true;
         }
@@ -445,7 +445,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             if (!isSubscribedToTwinResponses)
             {
-                await SubscribeAsync(TwinResponseTopic, cancellationToken);
+                await SubscribeAsync(TwinResponseTopic, MqttClientSubscribeResultCode.GrantedQoS0, cancellationToken);
                 isSubscribedToTwinResponses = true;
             }
 
@@ -483,7 +483,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             if (!isSubscribedToTwinResponses)
             {
-                await SubscribeAsync(TwinResponseTopic, cancellationToken);
+                await SubscribeAsync(TwinResponseTopic, MqttClientSubscribeResultCode.GrantedQoS0, cancellationToken);
                 isSubscribedToTwinResponses = true;
             }
 
@@ -572,7 +572,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             isSubscribedToTwinResponses = false;
         }
 
-        private async Task SubscribeAsync(string topic, CancellationToken cancellationToken)
+        private async Task SubscribeAsync(string topic, MqttClientSubscribeResultCode expectedQoS, CancellationToken cancellationToken)
         {
             MqttClientSubscribeOptions subscribeOptions = new MqttClientSubscribeOptionsBuilder()
                 .WithTopicFilter(topic)
@@ -586,7 +586,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 throw new Exception("Failed to subscribe to topic " + topic);
             }
 
-            if (subscribeResult.Items[0].ResultCode != MqttClientSubscribeResultCode.GrantedQoS1)
+            if (subscribeResult.Items[0].ResultCode != expectedQoS)
             {
                 //TODO
                 throw new Exception("Failed to subscribe to topic " + topic + " with reason " + subscribeResult.Items[0].ResultCode);
