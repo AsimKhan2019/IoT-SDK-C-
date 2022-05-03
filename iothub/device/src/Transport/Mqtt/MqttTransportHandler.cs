@@ -90,7 +90,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         // Topic names for enabling events on Modules.
 
-        private const string ReceiveEventMessageTopic = "devices/{0}/modules/{1}/";
+        private const string ReceiveEventMessageTopicPrefix = "devices/{0}/modules/{1}/";
+        private const string ReceiveEventMessageTopic = DeviceBoundMessagesTopicPrefix + "#";
+        private string receiveEventMessageTopic;
+        private string receiveEventMessageTopicPrefix;
 
         private const string DeviceClientTypeParam = "DeviceClientType";
 
@@ -219,6 +222,9 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             deviceBoundMessagesTopicPrefix = string.Format(CultureInfo.InvariantCulture, DeviceBoundMessagesTopicPrefix, deviceId);
             deviceBoundMessagesTopic = string.Format(CultureInfo.InvariantCulture, DeviceBoundMessagesTopic, deviceId);
 
+            receiveEventMessageTopicPrefix = string.Format(CultureInfo.InvariantCulture, ReceiveEventMessageTopicPrefix, deviceId, moduleId);
+            receiveEventMessageTopic = string.Format(CultureInfo.InvariantCulture, ReceiveEventMessageTopic, deviceId, moduleId);
+
             var mqttFactory = new MqttFactory();
 
             mqttClient = mqttFactory.CreateMqttClient();
@@ -231,10 +237,19 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 var uri = "wss://" + iotHubConnectionString.HostName + "/$iothub/websocket";
                 mqttClientOptionsBuilder.WithWebSocketServer(uri);
+
+                if (_transportSettings.Proxy != null)
+                {
+                    //TODO no idea how to get the "address" that the mqtt client needs here
+                    Uri uri2 = new Uri("wss://" + iotHubConnectionString.HostName);
+                    string address = _transportSettings.Proxy.GetProxy(uri2).LocalPath;
+                    mqttClientOptionsBuilder.WithProxy(address);
+                }
             }
             else 
             {
-                var uri = "ssl://" + iotHubConnectionString.HostName;
+                // "ssl://" prefix is not needed here
+                var uri = iotHubConnectionString.HostName;
                 mqttClientOptionsBuilder.WithTcpServer(uri, ProtocolGatewayPort);
             }
 
@@ -255,10 +270,13 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             tlsParameters.Certificates = certs;
             tlsParameters.CertificateValidationHandler = certificateValidationHandler;
+            tlsParameters.UseTls = true;
+            tlsParameters.SslProtocol = System.Security.Authentication.SslProtocols.Tls12; //TODO get this from system instead of hardcoding it?
             mqttClientOptionsBuilder.WithTls(tlsParameters);
-
+            
+            mqttClientOptionsBuilder.WithProtocolVersion(MQTTnet.Formatter.MqttProtocolVersion.V311);
             mqttClientOptionsBuilder.WithCleanSession();
-
+            
             mqttClientOptions = mqttClientOptionsBuilder.Build();
 
             mqttClient.UseApplicationMessageReceivedHandler(HandleReceivedMessage);
@@ -298,7 +316,20 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var mqttMessage = ComposePublishPacket(message, deviceToCloudMessagesTopic);
+            string TopicName = PopulateMessagePropertiesFromMessage(deviceToCloudMessagesTopic, message);
+
+            Stream payloadStream = message.GetBodyStream();
+            long streamLength = payloadStream.Length;
+            if (streamLength > MaxMessageSize)
+            {
+                throw new InvalidOperationException($"Message size ({streamLength} bytes) is too big to process. Maximum allowed payload size is {MaxMessageSize}");
+            }
+
+            var mqttMessage = new MqttApplicationMessageBuilder()
+                .WithTopic(TopicName)
+                .WithPayload(payloadStream)
+                .WithAtLeastOnceQoS()
+                .Build();
 
             MqttClientPublishResult result = await mqttClient.PublishAsync(mqttMessage, cancellationToken);
 
@@ -334,22 +365,7 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
             if (!isSubscribedToCloudToDeviceMessages)
             {
-                MqttClientSubscribeOptions subscribeOptions = new MqttClientSubscribeOptionsBuilder()
-                    .WithTopicFilter(deviceBoundMessagesTopic)
-                    .Build();
-
-                MqttClientSubscribeResult subscribeResult = await mqttClient.SubscribeAsync(subscribeOptions, cancellationToken);
-
-                if (subscribeResult.Items.Count != 1)
-                { 
-                    //TODO 
-                }
-
-                if (subscribeResult.Items[0].ResultCode != MqttClientSubscribeResultCode.GrantedQoS1)
-                { 
-                    //TODO
-                }
-
+                await SubscribeAsync(deviceBoundMessagesTopic, cancellationToken);
                 isSubscribedToCloudToDeviceMessages = true;
             }
 
@@ -367,40 +383,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         public override async Task EnableMethodsAsync(CancellationToken cancellationToken)
         {
-            MqttClientSubscribeOptions subscribeOptions = new MqttClientSubscribeOptionsBuilder()
-                .WithTopicFilter(DirectMethodsSubscriptionTopicFormat)
-                .Build();
-
-            MqttClientSubscribeResult subscribeResult = await mqttClient.SubscribeAsync(subscribeOptions, cancellationToken);
-
-            if (subscribeResult.Items.Count != 1)
-            {
-                //TODO 
-            }
-
-            if (subscribeResult.Items[0].ResultCode != MqttClientSubscribeResultCode.GrantedQoS1)
-            {
-                //TODO
-            }
+            await SubscribeAsync(DirectMethodsSubscriptionTopicFormat, cancellationToken);
         }
 
         public override async Task DisableMethodsAsync(CancellationToken cancellationToken)
         {
-            MqttClientUnsubscribeOptions unsubscribeOptions = new MqttClientUnsubscribeOptionsBuilder()
-                .WithTopicFilter(DirectMethodsSubscriptionTopicFormat)
-                .Build();
-
-            MqttClientUnsubscribeResult unsubscribeResult = await mqttClient.UnsubscribeAsync(unsubscribeOptions, cancellationToken);
-
-            if (unsubscribeResult.Items.Count != 1)
-            {
-                //TODO 
-            }
-
-            if (unsubscribeResult.Items[0].ReasonCode != MqttClientUnsubscribeResultCode.Success)
-            {
-                //TODO
-            }
+            await UnsubscribeAsync(DirectMethodsSubscriptionTopicFormat, cancellationToken);
         }
 
         public override async Task SendMethodResponseAsync(MethodResponseInternal methodResponse, CancellationToken cancellationToken)
@@ -422,14 +410,16 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        public override Task EnableEventReceiveAsync(bool isAnEdgeModule, CancellationToken cancellationToken)
+        public override async Task EnableEventReceiveAsync(bool isAnEdgeModule, CancellationToken cancellationToken)
         {
-            throw new NotSupportedException("TODO");
+            //TODO what about isAnEdgeModule?
+            await SubscribeAsync(receiveEventMessageTopic, cancellationToken);
+            isSubscribedToDesiredPropertyPatches = true;
         }
 
-        public override Task DisableEventReceiveAsync(bool isAnEdgeModule, CancellationToken cancellationToken)
+        public override async Task DisableEventReceiveAsync(bool isAnEdgeModule, CancellationToken cancellationToken)
         {
-            throw new NotSupportedException("TODO");
+            await UnsubscribeAsync(receiveEventMessageTopic, cancellationToken);
         }
 
         public override async Task EnableTwinPatchAsync(CancellationToken cancellationToken)
@@ -439,43 +429,14 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 return;
             }
 
-            //TODO factor out subscribe logic to one function?
-            MqttClientSubscribeOptions subscribeOptions = new MqttClientSubscribeOptionsBuilder()
-                .WithTopicFilter(TwinDesiredPropertiesPatchTopic)
-                .Build();
-
-            MqttClientSubscribeResult subscribeResult = await mqttClient.SubscribeAsync(subscribeOptions, cancellationToken);
-
-            if (subscribeResult.Items.Count != 1)
-            {
-                //TODO 
-            }
-
-            if (subscribeResult.Items[0].ResultCode != MqttClientSubscribeResultCode.GrantedQoS1)
-            {
-                //TODO
-            }
+            await SubscribeAsync(TwinDesiredPropertiesPatchTopic, cancellationToken);
 
             isSubscribedToDesiredPropertyPatches = true;
         }
 
         public override async Task DisableTwinPatchAsync(CancellationToken cancellationToken)
         {
-            MqttClientUnsubscribeOptions unsubscribeOptions = new MqttClientUnsubscribeOptionsBuilder()
-                .WithTopicFilter(TwinDesiredPropertiesPatchTopic)
-                .Build();
-
-            MqttClientUnsubscribeResult unsubscribeResult = await mqttClient.UnsubscribeAsync(unsubscribeOptions, cancellationToken);
-
-            if (unsubscribeResult.Items.Count != 1)
-            {
-                //TODO 
-            }
-
-            if (unsubscribeResult.Items[0].ReasonCode != MqttClientUnsubscribeResultCode.Success)
-            {
-                //TODO
-            }
+            await UnsubscribeAsync(TwinDesiredPropertiesPatchTopic, cancellationToken);
 
             isSubscribedToDesiredPropertyPatches = false;
         }
@@ -484,7 +445,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             if (!isSubscribedToTwinResponses)
             {
-                await EnableTwinResponsesAsync(cancellationToken);
+                await SubscribeAsync(TwinResponseTopic, cancellationToken);
+                isSubscribedToTwinResponses = true;
             }
 
             string requestId = Guid.NewGuid().ToString();
@@ -521,7 +483,8 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
         {
             if (!isSubscribedToTwinResponses)
             {
-                await EnableTwinResponsesAsync(cancellationToken);
+                await SubscribeAsync(TwinResponseTopic, cancellationToken);
+                isSubscribedToTwinResponses = true;
             }
 
             string requestId = Guid.NewGuid().ToString();
@@ -602,47 +565,53 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
 
         #endregion Client operations
 
-        private async Task EnableTwinResponsesAsync(CancellationToken cancellationToken)
+        private async Task DisableTwinResponsesAsync(CancellationToken cancellationToken)
         {
-            //TODO factor out subscribe logic to one function?
+            await UnsubscribeAsync(TwinResponseTopic, cancellationToken);
+
+            isSubscribedToTwinResponses = false;
+        }
+
+        private async Task SubscribeAsync(string topic, CancellationToken cancellationToken)
+        {
             MqttClientSubscribeOptions subscribeOptions = new MqttClientSubscribeOptionsBuilder()
-                .WithTopicFilter(TwinResponseTopic)
+                .WithTopicFilter(topic)
                 .Build();
 
             MqttClientSubscribeResult subscribeResult = await mqttClient.SubscribeAsync(subscribeOptions, cancellationToken);
 
             if (subscribeResult.Items.Count != 1)
             {
-                //TODO 
+                //TODO
+                throw new Exception("Failed to subscribe to topic " + topic);
             }
 
             if (subscribeResult.Items[0].ResultCode != MqttClientSubscribeResultCode.GrantedQoS1)
             {
                 //TODO
+                throw new Exception("Failed to subscribe to topic " + topic + " with reason " + subscribeResult.Items[0].ResultCode);
             }
-
-            isSubscribedToTwinResponses = true;
         }
 
-        private async Task DisableTwinResponsesAsync(CancellationToken cancellationToken)
+        private async Task UnsubscribeAsync(string topic, CancellationToken cancellationToken)
         {
             MqttClientUnsubscribeOptions unsubscribeOptions = new MqttClientUnsubscribeOptionsBuilder()
-                .WithTopicFilter(TwinResponseTopic)
-                .Build();
+                    .WithTopicFilter(topic)
+                    .Build();
 
             MqttClientUnsubscribeResult unsubscribeResult = await mqttClient.UnsubscribeAsync(unsubscribeOptions, cancellationToken);
 
             if (unsubscribeResult.Items.Count != 1)
             {
                 //TODO 
+                throw new Exception("Failed to unsubscribe from topic " + topic);
             }
 
             if (unsubscribeResult.Items[0].ReasonCode != MqttClientUnsubscribeResultCode.Success)
             {
                 //TODO
+                throw new Exception("Failed to subscribe to topic " + topic + " with reason " + unsubscribeResult.Items[0].ReasonCode);
             }
-
-            isSubscribedToTwinResponses = false;
         }
 
         private Task HandleDisconnection(MqttClientDisconnectedEventArgs disconnectedEventArgs)
@@ -670,6 +639,10 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             else if (topic.StartsWith(DirectMethodsReceivingTopicFormat))
             {
                 await HandleReceivedDirectMethodRequest(receivedEventArgs);
+            }
+            else if (topic.StartsWith(receiveEventMessageTopicPrefix))
+            { 
+                await HandleIncomingEventMessage(receivedEventArgs);
             }
             else
             {
@@ -787,34 +760,29 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             }
         }
 
-        //TODO only used in one place?
-        public MqttApplicationMessage ComposePublishPacket(Message message, string topicName)
+        private async Task HandleIncomingEventMessage(MqttApplicationMessageReceivedEventArgs receivedEventArgs)
         {
-            if (Logging.IsEnabled)
-                Logging.Enter(this, topicName, nameof(ComposePublishPacket));
-
+            byte[] payload = receivedEventArgs.ApplicationMessage.Payload;
+            Message iotHubMessage = new Message(payload);
             try
             {
-                string TopicName = PopulateMessagePropertiesFromMessage(topicName, message);
-                                
-                Stream payloadStream = message.GetBodyStream();
-                long streamLength = payloadStream.Length;
-                if (streamLength > MaxMessageSize)
-                {
-                    throw new InvalidOperationException($"Message size ({streamLength} bytes) is too big to process. Maximum allowed payload size is {MaxMessageSize}");
-                }
+                // The MqttTopic is in the format - devices/deviceId/modules/moduleId/inputs/inputName
+                // We try to get the endpoint from the topic, if the topic is in the above format.
+                string[] tokens = receivedEventArgs.ApplicationMessage.Topic.Split('/');
+                string inputName = tokens.Length >= 6 ? tokens[5] : null;
 
-                return new MqttApplicationMessageBuilder()
-                    .WithTopic(TopicName)
-                    .WithPayload(payloadStream)
-                    .WithAtLeastOnceQoS()
-                    .Build();
+                // Add the endpoint as a SystemProperty
+                iotHubMessage.SystemProperties.Add(MessageSystemPropertyNames.InputName, inputName);
+
+                await (_moduleMessageReceivedListener?.Invoke(inputName, iotHubMessage) ?? TaskHelpers.CompletedTask).ConfigureAwait(false);
             }
             finally
             {
-                if (Logging.IsEnabled)
-                    Logging.Exit(this, topicName, nameof(ComposePublishPacket));
+                iotHubMessage.Dispose();
             }
+
+            //TODO do users manually complete these like cloud to device messages?
+            receivedEventArgs.AutoAcknowledge = true;
         }
 
         public void PopulateMessagePropertiesFromPacket(Message message, MqttApplicationMessage mqttMessage)
