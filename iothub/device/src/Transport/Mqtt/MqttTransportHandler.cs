@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -235,9 +236,6 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             {
                 var uri = "ssl://" + iotHubConnectionString.HostName;
                 mqttClientOptionsBuilder.WithTcpServer(uri, ProtocolGatewayPort);
-                MqttClientOptionsBuilderTlsParameters tlsParameters = new MqttClientOptionsBuilderTlsParameters();
-                tlsParameters.Certificates = iotHubConnectionString.auth
-                mqttClientOptionsBuilder.WithTls();
             }
 
             if (iotHubConnectionString.SharedAccessKey != null)
@@ -249,6 +247,17 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
                 mqttClientOptionsBuilder.WithClientId(clientId);
             }
 
+            MqttClientOptionsBuilderTlsParameters tlsParameters = new MqttClientOptionsBuilderTlsParameters();
+
+            List<X509Certificate> certs = settings.ClientCertificate == null
+                ? new List<X509Certificate>(0)
+                : new List<X509Certificate> { settings.ClientCertificate };
+
+            tlsParameters.Certificates = certs;
+            tlsParameters.CertificateValidationHandler = certificateValidationHandler;
+            mqttClientOptionsBuilder.WithTls(tlsParameters);
+
+            mqttClientOptionsBuilder.WithCleanSession();
 
             mqttClientOptions = mqttClientOptionsBuilder.Build();
 
@@ -256,6 +265,12 @@ namespace Microsoft.Azure.Devices.Client.Transport.Mqtt
             mqttClient.UseDisconnectedHandler(HandleDisconnection);
 
             isSubscribedToCloudToDeviceMessages = false;
+        }
+
+        private bool certificateValidationHandler(MqttClientCertificateValidationCallbackContext asdf)
+        {
+            //TODO
+            return true;
         }
 
         #region Client operations
