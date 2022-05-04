@@ -11,6 +11,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using FluentAssertions;
 using Microsoft.Azure.Devices.Client;
 using Microsoft.Azure.Devices.Provisioning.Client;
 using Microsoft.Azure.Devices.Provisioning.Client.Transport;
@@ -42,6 +43,7 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
         private readonly VerboseTestLogger _verboseLog = VerboseTestLogger.GetInstance();
 
         private static DirectoryInfo s_dpsClientCertificateFolder;
+        private static DirectoryInfo s_selfSignedCertificatesFolder;
 
         public enum EnrollmentType
         {
@@ -52,8 +54,9 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
         [ClassInitialize]
         public static void TestClassSetup(TestContext _)
         {
-            // Create a folder to hold the DPS client certificates. If a folder by the same name already exists, it will be used.
+            // Create a folder to hold the DPS client certificates and X509 self-signed certificates. If a folder by the same name already exists, it will be used.
             s_dpsClientCertificateFolder = Directory.CreateDirectory("DpsClientCertificates");
+            s_selfSignedCertificatesFolder = s_dpsClientCertificateFolder.CreateSubdirectory("SelfSignedCertificates");
         }
 
         [LoggedTestMethod]
@@ -1485,6 +1488,7 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
         {
             _verboseLog.WriteLine($"{nameof(CreateSecurityProviderFromNameAsync)}({attestationType})");
 
+            string registrationId = AttestationTypeToString(attestationType) + "-" + Guid.NewGuid();
             using var provisioningServiceClient = ProvisioningServiceClient.CreateFromConnectionString(TestConfiguration.Provisioning.ConnectionString);
 
             switch (attestationType)
@@ -1492,7 +1496,9 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
                 case AttestationMechanismType.Tpm:
                     IndividualEnrollment tpmEnrollment = await CreateIndividualEnrollmentAsync(
                         provisioningServiceClient,
+                        registrationId,
                         AttestationMechanismType.Tpm,
+                        null,
                         reprovisionPolicy,
                         allocationPolicy,
                         customAllocationDefinition,
@@ -1508,9 +1514,31 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
                     X509Certificate2Collection collection = null;
                     switch (enrollmentType)
                     {
-                        case EnrollmentType.Individual:
+                        /*case EnrollmentType.Individual:
                             certificate = s_individualEnrollmentCertificate;
-                            break;
+                            break;*/
+
+                        case EnrollmentType.Individual:
+                            string selfSignedCertificatePath = GenerateSelfSignedCertificates(registrationId);
+#pragma warning disable CA2000 // Dispose objects before losing scope
+                            certificate = new X509Certificate2(selfSignedCertificatePath, TestConfiguration.Provisioning.CertificatePassword);
+#pragma warning restore CA2000 // Dispose objects before losing scope
+
+                            IndividualEnrollment x509IndividualEnrollment = await CreateIndividualEnrollmentAsync(
+                                provisioningServiceClient,
+                                registrationId,
+                                AttestationMechanismType.X509,
+                                certificate,
+                                reprovisionPolicy,
+                                allocationPolicy,
+                                customAllocationDefinition,
+                                iothubs,
+                                capabilities,
+                                connectToHubUsingOperationalCertificate).ConfigureAwait(false);
+
+                            x509IndividualEnrollment.Attestation.Should().BeAssignableTo<X509Attestation>();
+
+                            return new SecurityProviderX509Certificate(certificate);
 
                         case EnrollmentType.Group:
                             certificate = s_groupEnrollmentCertificate;
@@ -1552,7 +1580,9 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
                         case EnrollmentType.Individual:
                             IndividualEnrollment symmetricKeyEnrollment = await CreateIndividualEnrollmentAsync(
                                 provisioningServiceClient,
+                                registrationId,
                                 AttestationMechanismType.SymmetricKey,
+                                null,
                                 reprovisionPolicy,
                                 allocationPolicy,
                                 customAllocationDefinition,
@@ -1751,6 +1781,25 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
             {
                 logger.Trace(fileName);
             }
+        }
+
+        private static string GenerateSelfSignedCertificates(string registrationId)
+        {
+            using var ecdsa = ECDsa.Create(); // generate asymmetric key pair
+            var req = new CertificateRequest($"cn={registrationId}", ecdsa, HashAlgorithmName.SHA256);
+            var cert = req.CreateSelfSigned(DateTimeOffset.Now, DateTimeOffset.Now.AddDays(7));
+
+            // Create PFX (PKCS #12) with private key
+            File.WriteAllBytes($"{s_selfSignedCertificatesFolder}\\{registrationId}.pfx", cert.Export(X509ContentType.Pfx, TestConfiguration.Provisioning.CertificatePassword));
+
+            // Create Base 64 encoded CER (public key only)
+            string certificatePath = $"{s_selfSignedCertificatesFolder}\\{registrationId}.cer";
+            File.WriteAllText(certificatePath,
+                "-----BEGIN CERTIFICATE-----\r\n"
+                + Convert.ToBase64String(cert.Export(X509ContentType.Cert), Base64FormattingOptions.InsertLineBreaks)
+                + "\r\n-----END CERTIFICATE-----");
+
+            return certificatePath;
         }
 
         [ClassCleanup]
