@@ -1516,19 +1516,24 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
                     {
                         /*case EnrollmentType.Individual:
                             certificate = s_individualEnrollmentCertificate;
+
+                            IndividualEnrollment individualEnrollment = await provisioningServiceClient.GetIndividualEnrollmentAsync("iothubx509device1").ConfigureAwait(false);
+
                             break;*/
 
                         case EnrollmentType.Individual:
-                            string selfSignedCertificatePath = GenerateSelfSignedCertificates(registrationId);
+                            GenerateSelfSignedCertificates(registrationId);
+
 #pragma warning disable CA2000 // Dispose objects before losing scope
-                            certificate = new X509Certificate2(selfSignedCertificatePath, TestConfiguration.Provisioning.CertificatePassword);
+                            X509Certificate2 publicCertificate = CreateX509CertificateWithPublicKey(registrationId);
+                            X509Certificate2 publicPrivateCertificate = CreateX509CertificateWithPublicPrivateKey(registrationId);
 #pragma warning restore CA2000 // Dispose objects before losing scope
 
                             IndividualEnrollment x509IndividualEnrollment = await CreateIndividualEnrollmentAsync(
                                 provisioningServiceClient,
                                 registrationId,
                                 AttestationMechanismType.X509,
-                                certificate,
+                                publicCertificate,
                                 reprovisionPolicy,
                                 allocationPolicy,
                                 customAllocationDefinition,
@@ -1538,7 +1543,7 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
 
                             x509IndividualEnrollment.Attestation.Should().BeAssignableTo<X509Attestation>();
 
-                            return new SecurityProviderX509Certificate(certificate);
+                            return new SecurityProviderX509Certificate(publicCertificate);
 
                         case EnrollmentType.Group:
                             certificate = s_groupEnrollmentCertificate;
@@ -1730,7 +1735,11 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
         {
             // Generate keypair
             Logger.Trace($"Generating ECC P-256 {registrationId}.key file using ...\n");
-            string keygen = $"ecparam -genkey -name prime256v1 -out {s_dpsClientCertificateFolder}\\{registrationId}.key";
+            string keygen = $"ecparam" +
+                $" -genkey" +
+                $" -name prime256v1" +
+                $" -out {s_dpsClientCertificateFolder}\\{registrationId}.key";
+
             Logger.Trace($"openssl {keygen}\n");
             using (var cmdProcess = Process.Start("openssl", keygen))
             {
@@ -1742,7 +1751,12 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
 
             // Generate csr
             Logger.Trace($"Generating {registrationId}.csr file using ...\n");
-            string csrgen = $"req -new -key {s_dpsClientCertificateFolder}\\{registrationId}.key -out {s_dpsClientCertificateFolder}\\{registrationId}.csr -subj /CN={registrationId}";
+            string csrgen = $"req" +
+                $" -new" +
+                $" -key {s_dpsClientCertificateFolder}\\{registrationId}.key" +
+                $" -out {s_dpsClientCertificateFolder}\\{registrationId}.csr" +
+                $" -subj /CN={registrationId}";
+
             Logger.Trace($"openssl {csrgen}\n");
             using (var cmdProcess = Process.Start("openssl", csrgen))
             {
@@ -1761,7 +1775,13 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
             File.WriteAllText($"{s_dpsClientCertificateFolder}\\{registrationId}.cer", issuedCertificate);
 
             Logger.Trace($"Generating {registrationId}.pfx file using ...\n");
-            string pfxgen = $"pkcs12 -export -out {s_dpsClientCertificateFolder}\\{registrationId}.pfx -inkey {s_dpsClientCertificateFolder}\\{registrationId}.key -in {s_dpsClientCertificateFolder}\\{registrationId}.cer -passout pass:";
+            string pfxgen = $"pkcs12" +
+                $" -export" +
+                $" -out {s_dpsClientCertificateFolder}\\{registrationId}.pfx" +
+                $" -inkey {s_dpsClientCertificateFolder}\\{registrationId}.key" +
+                $" -in {s_dpsClientCertificateFolder}\\{registrationId}.cer" +
+                $" -passout pass:";
+
             Logger.Trace($"openssl {pfxgen}\n");
             using (var exeProcess = Process.Start("openssl", pfxgen))
             {
@@ -1774,6 +1794,72 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
             return new X509Certificate2($"{s_dpsClientCertificateFolder}\\{registrationId}.pfx");
         }
 
+        private void GenerateSelfSignedCertificates(string registrationId)
+        {
+            // Generate self-signed X509 certificate that is valid for 7 days
+            Logger.Trace($"Generating self-signed X509 certificate with subject {registrationId} using ...\n");
+            string keygen = $"req" +
+                $" -x509" +
+                $" -newkey rsa:4096" +
+                $" -subj /CN={registrationId}" +
+                $" -keyout {s_selfSignedCertificatesFolder}\\{registrationId}-key.pem" +
+                $" -out {s_selfSignedCertificatesFolder}\\{registrationId}-cert.crt" +
+                $" -sha256" +
+                $" -days 7" +
+                $" -passout pass:{TestConfiguration.Provisioning.CertificatePassword}";
+
+            Logger.Trace($"openssl {keygen}\n");
+            using (var cmdProcess = Process.Start("openssl", keygen))
+            {
+                cmdProcess.WaitForExit();
+            }
+
+            Logger.Trace($"Generating {registrationId}.pfx file using ...\n");
+            string pfxgen = $"pkcs12" +
+                $" -export" +
+                $" -out {s_selfSignedCertificatesFolder}\\{registrationId}.pfx" +
+                $" -inkey {s_selfSignedCertificatesFolder}\\{registrationId}-key.pem" +
+                $" -in {s_selfSignedCertificatesFolder}\\{registrationId}-cert.crt" +
+                $" -passin pass:{TestConfiguration.Provisioning.CertificatePassword}" +
+                $" -passout pass:";
+
+            Logger.Trace($"openssl {pfxgen}\n");
+            using (var exeProcess = Process.Start("openssl", pfxgen))
+            {
+                exeProcess.WaitForExit();
+            }
+
+            //return new X509Certificate2($"{s_selfSignedCertificatesFolder}\\{registrationId}.pfx");
+
+            /*using var ecdsa = ECDsa.Create(); // generate asymmetric key pair
+            var req = new CertificateRequest($"cn={registrationId}", ecdsa, HashAlgorithmName.SHA256);
+            var cert = req.CreateSelfSigned(DateTimeOffset.Now, DateTimeOffset.Now.AddDays(7));
+
+            // Create PFX (PKCS #12) with private key
+            File.WriteAllBytes($"{s_selfSignedCertificatesFolder}\\{registrationId}.pfx", cert.Export(X509ContentType.Pfx, TestConfiguration.Provisioning.CertificatePassword));
+
+            return new X509Certificate2($"{s_selfSignedCertificatesFolder}\\{registrationId}.pfx");*/
+
+            /*// Create Base 64 encoded CER (public key only)
+            string certificatePath = $"{s_selfSignedCertificatesFolder}\\{registrationId}.cer";
+            File.WriteAllText(certificatePath,
+                "-----BEGIN CERTIFICATE-----\r\n"
+                + Convert.ToBase64String(cert.Export(X509ContentType.Cert), Base64FormattingOptions.InsertLineBreaks)
+                + "\r\n-----END CERTIFICATE-----");
+
+            return certificatePath;*/
+        }
+
+        private X509Certificate2 CreateX509CertificateWithPublicKey(string registrationId)
+        {
+            return new X509Certificate2($"{s_selfSignedCertificatesFolder}\\{registrationId}-cert.crt");
+        }
+
+        private X509Certificate2 CreateX509CertificateWithPublicPrivateKey(string registrationId)
+        {
+            return new X509Certificate2($"{s_selfSignedCertificatesFolder}\\{registrationId}.pfx");
+        }
+
         private static void ListAllFiles(string path, MsTestLogger logger)
         {
             logger.Trace($"Listing files in: {path}");
@@ -1781,25 +1867,6 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
             {
                 logger.Trace(fileName);
             }
-        }
-
-        private static string GenerateSelfSignedCertificates(string registrationId)
-        {
-            using var ecdsa = ECDsa.Create(); // generate asymmetric key pair
-            var req = new CertificateRequest($"cn={registrationId}", ecdsa, HashAlgorithmName.SHA256);
-            var cert = req.CreateSelfSigned(DateTimeOffset.Now, DateTimeOffset.Now.AddDays(7));
-
-            // Create PFX (PKCS #12) with private key
-            File.WriteAllBytes($"{s_selfSignedCertificatesFolder}\\{registrationId}.pfx", cert.Export(X509ContentType.Pfx, TestConfiguration.Provisioning.CertificatePassword));
-
-            // Create Base 64 encoded CER (public key only)
-            string certificatePath = $"{s_selfSignedCertificatesFolder}\\{registrationId}.cer";
-            File.WriteAllText(certificatePath,
-                "-----BEGIN CERTIFICATE-----\r\n"
-                + Convert.ToBase64String(cert.Export(X509ContentType.Cert), Base64FormattingOptions.InsertLineBreaks)
-                + "\r\n-----END CERTIFICATE-----");
-
-            return certificatePath;
         }
 
         [ClassCleanup]
