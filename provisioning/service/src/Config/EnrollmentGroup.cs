@@ -338,10 +338,10 @@ namespace Microsoft.Azure.Devices.Provisioning.Service
         [JsonProperty(PropertyName = "customAllocationDefinition", DefaultValueHandling = DefaultValueHandling.Ignore)]
         public CustomAllocationDefinition CustomAllocationDefinition { get; set; }
 
-        /*/// <summary>
+        /// <summary>
         /// The issuance policy for client certificates.
         /// </summary>
         [JsonProperty(PropertyName = "clientCertificateIssuancePolicy", DefaultValueHandling = DefaultValueHandling.Ignore)]
-        public ClientCertificateIssuancePolicy ClientCertificateIssuancePolicy { get; set; }*/
+        public ClientCertificateIssuancePolicy ClientCertificateIssuancePolicy { get; set; }
     }
 }
