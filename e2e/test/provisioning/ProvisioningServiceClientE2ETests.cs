@@ -283,7 +283,7 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
                             ReprovisionPolicy = reprovisionPolicy,
                             CustomAllocationDefinition = customAllocationDefinition,
                             IotHubs = iotHubsToProvisionTo,
-                            ClientCertificateIssuancePolicy = connectToHubUsingOperationalCertificate ? new ClientCertificateIssuancePolicy { CertificateAuthorityName = s_clientCertificatesCAName } : null,
+                            // ClientCertificateIssuancePolicy = connectToHubUsingOperationalCertificate ? new ClientCertificateIssuancePolicy { CertificateAuthorityName = s_clientCertificatesCAName } : null,
                         };
 
                         IndividualEnrollment enrollment = await provisioningServiceClient.CreateOrUpdateIndividualEnrollmentAsync(individualEnrollment).ConfigureAwait(false);
@@ -303,7 +303,7 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
                         ReprovisionPolicy = reprovisionPolicy,
                         CustomAllocationDefinition = customAllocationDefinition,
                         IotHubs = iotHubsToProvisionTo,
-                        ClientCertificateIssuancePolicy = connectToHubUsingOperationalCertificate ? new ClientCertificateIssuancePolicy { CertificateAuthorityName = s_clientCertificatesCAName } : null,
+                        // ClientCertificateIssuancePolicy = connectToHubUsingOperationalCertificate ? new ClientCertificateIssuancePolicy { CertificateAuthorityName = s_clientCertificatesCAName } : null,
                     };
                     return await provisioningServiceClient.CreateOrUpdateIndividualEnrollmentAsync(individualEnrollment).ConfigureAwait(false);
 
@@ -346,7 +346,7 @@ namespace Microsoft.Azure.Devices.E2ETests.Provisioning
                 AllocationPolicy = allocationPolicy,
                 CustomAllocationDefinition = customAllocationDefinition,
                 IotHubs = iothubs,
-                ClientCertificateIssuancePolicy = connectToHubUsingOperationalCertificate ? new ClientCertificateIssuancePolicy { CertificateAuthorityName = s_clientCertificatesCAName } : null,
+                // ClientCertificateIssuancePolicy = connectToHubUsingOperationalCertificate ? new ClientCertificateIssuancePolicy { CertificateAuthorityName = s_clientCertificatesCAName } : null,
             };
 
             return await provisioningServiceClient.CreateOrUpdateEnrollmentGroupAsync(enrollmentGroup).ConfigureAwait(false);
