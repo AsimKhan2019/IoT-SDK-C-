@@ -7,6 +7,6 @@ namespace Microsoft.Azure.Devices.Provisioning.Client
     {
         public const string ApiVersionName = "api-version";
 
-        public const string ApiVersion = "2019-03-31";
+        public const string ApiVersion = "2021-11-01-preview";
     }
 }
